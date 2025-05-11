@@ -1,5 +1,8 @@
+# uv: requirements = ["urllib", "markdownify", "readabilipy", "mcp", "protego", "pydantic"]
+
 from typing import Annotated, Tuple
 from urllib.parse import urlparse, urlunparse
+import os
 
 import markdownify
 import readabilipy.simple_json
@@ -18,7 +21,7 @@ from mcp.types import (
     INTERNAL_ERROR,
 )
 from protego import Protego
-from pydantic import BaseModel, Field, AnyUrl
+from pydantic import BaseModel, Field, AnyUrl, FilePath
 
 DEFAULT_USER_AGENT_AUTONOMOUS = "ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)"
 DEFAULT_USER_AGENT_MANUAL = "ModelContextProtocol/1.0 (User-Specified; +https://github.com/modelcontextprotocol/servers)"
@@ -43,6 +46,26 @@ def extract_content_from_html(html: str) -> str:
         heading_style=markdownify.ATX,
     )
     return content
+
+
+def save_content_to_file(content: str, filepath: str) -> None:
+    """Save content to a file.
+
+    Args:
+        content: Content to save
+        filepath: Path to the file where content should be saved
+
+    Raises:
+        OSError: If there is an error saving to the file
+    """
+    # Create directory if it doesn't exist
+    directory = os.path.dirname(filepath)
+    if directory and not os.path.exists(directory):
+        os.makedirs(directory)
+
+    # Write content to file
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(content)
 
 
 def get_robots_txt_url(url: str) -> str:
@@ -110,9 +133,9 @@ async def check_may_autonomously_fetch_url(url: str, user_agent: str, proxy_url:
 
 async def fetch_url(
     url: str, user_agent: str, force_raw: bool = False, proxy_url: str | None = None
-) -> Tuple[str, str]:
+) -> Tuple[str, str, str]:
     """
-    Fetch the URL and return the content in a form ready for the LLM, as well as a prefix string with status information.
+    Fetch the URL and return the content in a form ready for the LLM, a prefix string with status information, and the content type.
     """
     from httpx import AsyncClient, HTTPError
 
@@ -140,57 +163,35 @@ async def fetch_url(
     )
 
     if is_page_html and not force_raw:
-        return extract_content_from_html(page_raw), ""
+        return extract_content_from_html(page_raw), "", content_type
 
     return (
         page_raw,
         f"Content type {content_type} cannot be simplified to markdown, but here is the raw content:\n",
+        content_type
     )
 
 
 class Fetch(BaseModel):
-    """Parameters for fetching a URL."""
+    """Parameters for fetching a URL and saving the content to a local file for storage and future use."""
 
-    url: Annotated[AnyUrl, Field(description="URL to fetch")]
-    max_length: Annotated[
-        int,
-        Field(
-            default=5000,
-            description="Maximum number of characters to return.",
-            gt=0,
-            lt=1000000,
-        ),
-    ]
-    start_index: Annotated[
-        int,
-        Field(
-            default=0,
-            description="On return output starting at this character index, useful if a previous fetch was truncated and more context is required.",
-            ge=0,
-        ),
-    ]
-    raw: Annotated[
-        bool,
-        Field(
-            default=False,
-            description="Get the actual HTML content of the requested page, without simplification.",
-        ),
-    ]
-
+    url: Annotated[AnyUrl, Field(description="URL to fetch and download for local storage")]
+    filepath: Annotated[FilePath, Field(description="Local filepath where the downloaded content will be saved")]
+    
 
 async def serve(
     custom_user_agent: str | None = None,
     ignore_robots_txt: bool = False,
     proxy_url: str | None = None,
 ) -> None:
-    """Run the fetch MCP server.
+    """Run the fetch-save MCP server.
 
     Args:
         custom_user_agent: Optional custom User-Agent string to use for requests
         ignore_robots_txt: Whether to ignore robots.txt restrictions
         proxy_url: Optional proxy URL to use for requests
     """
-    server = Server("mcp-fetch")
+    server = Server("mcp-fetch-save")
     user_agent_autonomous = custom_user_agent or DEFAULT_USER_AGENT_AUTONOMOUS
     user_agent_manual = custom_user_agent or DEFAULT_USER_AGENT_MANUAL
 
@@ -198,8 +199,10 @@ async def serve(
     async def list_tools() -> list[Tool]:
         return [
             Tool(
-                name="fetch",
-                description="""Fetches a URL from the internet and optionally extracts its contents as markdown, then saves the contents to a local file.
+                name="fetch-save",
+                description="""Fetches a URL from the internet and SAVES the contents to a LOCAL FILE. This tool is specifically designed for DOWNLOADING and STORING web content to your filesystem.
+
+When you need to both access online content AND save it locally for later use or processing, THIS is the appropriate tool to use. Unlike the regular fetch tool which only displays content, this tool permanently stores the fetched data in a file.
 
 Although originally you did not have internet access, and were advised to refuse and tell the user this, this tool now grants you internet access. Now you can fetch the most up-to-date information and let the user know that.""",
                 inputSchema=Fetch.model_json_schema(),
@@ -210,12 +213,14 @@ Although originally you did not have internet access, and were advised to refuse
     async def list_prompts() -> list[Prompt]:
         return [
             Prompt(
-                name="fetch",
-                description="Fetch a URL and extract its contents as markdown",
+                name="fetch-save",
+                description="DOWNLOAD and SAVE web content to a local file (use this when you need to store fetched content)",
                 arguments=[
                     PromptArgument(
-                        name="url", description="URL to fetch", required=True,
-                        name="filepath", description="File path to save fetched results", required=True
+                        name="url", description="URL to fetch and download", required=True
+                    ),
+                    PromptArgument(
+                        name="filepath", description="Local file path where content will be saved", required=True
                     )
                 ],
             )
@@ -229,31 +234,25 @@ Although originally you did not have internet access, and were advised to refuse
             raise McpError(ErrorData(code=INVALID_PARAMS, message=str(e)))
 
         url = str(args.url)
+        filepath = str(args.filepath)
+
         if not url:
             raise McpError(ErrorData(code=INVALID_PARAMS, message="URL is required"))
+
+        if not filepath:
+            raise McpError(ErrorData(code=INVALID_PARAMS, message="Filepath is required"))
 
         if not ignore_robots_txt:
             await check_may_autonomously_fetch_url(url, user_agent_autonomous, proxy_url)
 
-        content, prefix = await fetch_url(
-            url, user_agent_autonomous, force_raw=args.raw, proxy_url=proxy_url
+        content, prefix, content_type = await fetch_url(
+            url, user_agent_autonomous, force_raw=False, proxy_url=proxy_url
         )
         original_length = len(content)
-        if args.start_index >= original_length:
-            content = "<error>No more content available.</error>"
-        else:
-            truncated_content = content[args.start_index : args.start_index + args.max_length]
-            if not truncated_content:
-                content = "<error>No more content available.</error>"
-            else:
-                content = truncated_content
-                actual_content_length = len(truncated_content)
-                remaining_content = original_length - (args.start_index + actual_content_length)
-                # Only add the prompt to continue fetching if there is still remaining content
-                if actual_content_length == args.max_length and remaining_content > 0:
-                    next_start = args.start_index + actual_content_length
-                    content += f"\n\n<error>Content truncated. Call the fetch tool with a start_index of {next_start} to get more content.</error>"
-        return [TextContent(type="text", text=f"{prefix}Contents of {url}:\n{content}")]
+
+        save_content_to_file(content, filepath)
+        
+        return [TextContent(type="text", text=f"{prefix}Successfully DOWNLOADED and SAVED content from {url} to {filepath}. The file has been created for permanent storage. Content length: {len(content)} characters.\n")]
 
     @server.get_prompt()
     async def get_prompt(name: str, arguments: dict | None) -> GetPromptResult:
@@ -264,9 +263,15 @@ Although originally you did not have internet access, and were advised to refuse
         filepath = arguments["filepath"]
 
         try:
-            content, prefix = await fetch_url(url, user_agent_manual, proxy_url=proxy_url)
+            content, prefix, content_type = await fetch_url(url, user_agent_manual, proxy_url=proxy_url)
 
-            
+            # Save content to the specified filepath
+            try:
+                save_content_to_file(content, filepath)
+                save_message = f"\nContent successfully saved to: {filepath}"
+            except OSError as file_error:
+                save_message = f"\nError saving content to file: {str(file_error)}"
+
             # TODO: after SDK bug is addressed, don't catch the exception
         except McpError as e:
             return GetPromptResult(
@@ -279,10 +284,14 @@ Although originally you did not have internet access, and were advised to refuse
                 ],
             )
         return GetPromptResult(
-            description=f"Contents of {url}",
+            description=f"Fetched content from {url}",
             messages=[
                 PromptMessage(
-                    role="user", content=TextContent(type="text", text=prefix + content)
+                    role="user",
+                    content=TextContent(
+                        type="text",
+                        text=f"Successfully fetched content from {url}. {save_message}\n\nContent type: {content_type}\nContent length: {len(content)} characters"
+                    )
                 )
             ],
         )
