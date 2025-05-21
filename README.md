@@ -4,6 +4,11 @@ A Model Context Protocol server that provides web content fetching and local fil
 
 The key difference from the standard fetch MCP server is that this server provides a **fetch-save** tool that both retrieves content AND stores it locally in a permanent file, allowing for later access or processing of the data.
 
+> [!CAUTION]
+> This server can access local/internal IP addresses and may represent a security risk. Exercise caution when using this MCP server to ensure this does not expose any sensitive data.
+
+Additional Note: The Readme and some code was written/edited with Claude Code - so parts may be incorrect. Please submit a PR if there are changes needed.
+
 ## Available Tools
 
 - `fetch-save` - Fetches a URL from the internet, extracts its contents as markdown, and SAVES it to a local file.
@@ -124,6 +129,25 @@ The server can be configured to use a proxy by using the `--proxy-url` argument.
 
 ## Debugging
 
+You can download this repo, and add this to your `.mcp.json` file to run/test locallly.
+
+```
+{
+  "mcpServers": {
+    "fetch_save": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/clone/of/project/mcp-server-fetch-save/src/mcp_server_fetch_save",
+        "run",
+        "__main__.py"
+      ]
+    }
+  }
+}
+
+```
+
 You can use the MCP inspector to debug the server. For uvx installations:
 
 ```
@@ -150,6 +174,6 @@ Pull requests are welcome! Feel free to contribute new ideas, bug fixes, or enha
 
 mcp-server-fetch-save is licensed under the MIT License. This means you are free to use, modify, and distribute the software, subject to the terms and conditions of the MIT License. For more details, please see the LICENSE file in the project repository.
 
-## Note
+## Thanks
 
 This server was developed based on the original [modelcontextprotocol/servers](https://github.com/modelcontextprotocol/servers/tree/main/src/fetch) fetch server, with additional functionality for saving content to local files.
