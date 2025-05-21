@@ -2,6 +2,10 @@
 
 A Model Context Protocol server that provides web content fetching and local file saving capabilities. This server enables LLMs to retrieve content from web pages, convert HTML to markdown for easier consumption, and save the retrieved content to a local file.
 
+<a href="https://glama.ai/mcp/servers/@gregberns/mcp-server-fetch-save">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@gregberns/mcp-server-fetch-save/badge" alt="Fetch-Save Server MCP server" />
+</a>
+
 The key difference from the standard fetch MCP server is that this server provides a **fetch-save** tool that both retrieves content AND stores it locally in a permanent file, allowing for later access or processing of the data.
 
 > [!CAUTION]
