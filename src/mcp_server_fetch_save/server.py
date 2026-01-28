@@ -1,5 +1,6 @@
 # uv: requirements = ["urllib", "markdownify", "readabilipy", "mcp", "protego", "pydantic"]
 
+from pathlib import Path
 from typing import Annotated, Tuple
 from urllib.parse import urlparse, urlunparse
 import os
@@ -21,7 +22,7 @@ from mcp.types import (
     INTERNAL_ERROR,
 )
 from protego import Protego
-from pydantic import BaseModel, Field, AnyUrl, FilePath
+from pydantic import BaseModel, Field, AnyUrl
 
 DEFAULT_USER_AGENT_AUTONOMOUS = "ModelContextProtocol/1.0 (Autonomous; +https://github.com/modelcontextprotocol/servers)"
 DEFAULT_USER_AGENT_MANUAL = "ModelContextProtocol/1.0 (User-Specified; +https://github.com/modelcontextprotocol/servers)"
@@ -176,7 +177,7 @@ class Fetch(BaseModel):
     """Parameters for fetching a URL and saving the content to a local file for storage and future use."""
 
     url: Annotated[AnyUrl, Field(description="URL to fetch and download for local storage")]
-    filepath: Annotated[FilePath, Field(description="Local filepath where the downloaded content will be saved")]
+    filepath: Annotated[Path, Field(description="Local filepath where the downloaded content will be saved")]
     
 
 async def serve(
